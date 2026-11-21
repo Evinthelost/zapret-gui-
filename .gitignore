@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+build_work/
+build_dist/
+build_spec/
+build_assets/*.spec
+release/ZapretControl/
+utils/
+*.log
+*.bak-gui
+selftest.txt
+*.tmp
+ui-*.png
+final-ui*.png
+preview*.png
+py-preview.png
