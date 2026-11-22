@@ -871,6 +871,11 @@ def build_args(profile="universal", variant="hostfakesplit", game_udp=False):
     if is_universal:
         rules.append(
             ["--filter-udp=443"]
+            + google
+            + ["--dpi-desync=fake", "--dpi-desync-repeats=6", f"--dpi-desync-fake-quic={quic}"]
+        )
+        rules.append(
+            ["--filter-udp=443"]
             + ipset
             + ["--dpi-desync=fake", "--dpi-desync-repeats=6", f"--dpi-desync-fake-quic={quic}"]
         )
