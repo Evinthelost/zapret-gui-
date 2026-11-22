@@ -6,6 +6,8 @@
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB)
 ![Build](https://img.shields.io/badge/build-PyInstaller-2B2B2B)
 
+![Zapret Control](screenshot.png)
+
 ## Скачать
 
 **Готовая сборка (Python не нужен):**
@@ -81,6 +83,3 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed ^
 
 См. [NOTICE.md](NOTICE.md). В сборку входят `winws.exe` и списки из проекта zapret, а также WinDivert. У них свои лицензии; GUI-код — MIT.
 
-## Скриншот
-
-Скриншот добавь сюда после первого запуска (файл `screenshot.png`), если хочешь красивую карточку репозитория.
