@@ -32,7 +32,8 @@ from tkinter import messagebox, ttk
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
 else:
-    APP_ROOT = Path(__file__).resolve().parent
+    APP_VERSION = "1.6"
+APP_ROOT = Path(__file__).resolve().parent
 BIN = APP_ROOT / "bin"
 LISTS = APP_ROOT / "lists"
 UTILS = APP_ROOT / "utils"
@@ -1009,42 +1010,105 @@ def connection_targets():
     return results
 
 
+def _tune_score(row):
+    return (
+        (100 if row["youtube"] else 0)
+        + (50 if row["yt_video"] else 0)
+        + (20 if row["yt_cdn"] else 0)
+        + (20 if row["steam"] else 0)
+        + (10 if row["steam_api"] else 0)
+        + (10 if row["discord"] else 0)
+        + (5 if row["discord_cdn"] else 0)
+    )
+
+
 def auto_tune(profile, game_udp, progress=None):
     results = []
     best, best_score = None, -1
+    max_score = 215
+    yt_home = "https://www.youtube.com"
+    yt_video = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    yt_cdn = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
+    steam = "https://steamcommunity.com"
+    steam_api = "https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/"
+    discord = "https://discord.com/api/v10/gateway"
+    discord_cdn = "https://cdn.discordapp.com/embed/avatars/0.png"
+
     for variant in VARIANTS:
         if progress:
             progress(variant)
-        row = {"variant": variant, "youtube": False, "steam": False,
-               "discord": False, "score": 0, "code": ""}
+        row = {
+            "variant": variant, "youtube": False, "yt_video": False,
+            "yt_cdn": False, "steam": False, "steam_api": False,
+            "discord": False, "discord_cdn": False, "score": 0, "code": "",
+        }
         try:
             start_engine(profile, variant, game_udp)
-            time.sleep(0.7)
-            ok, code, _detail, _ = test_url("https://www.youtube.com", 7)
+            time.sleep(0.8)
+            ok, code, _detail, _ = test_url(yt_home, 7)
             row["youtube"] = ok
             row["code"] = code
             if ok:
-                row["steam"] = test_url("https://steamcommunity.com", 5)[0]
-                row["discord"] = test_url("https://discord.com/api/v10/gateway", 5)[0]
-            row["score"] = (
-                (100 if row["youtube"] else 0)
-                + (10 if row["steam"] else 0)
-                + (5 if row["discord"] else 0)
-            )
+                row["yt_video"] = test_url(yt_video, 7)[0]
+                row["yt_cdn"] = test_url(yt_cdn, 5)[0]
+            row["steam"] = test_url(steam, 6)[0]
+            row["steam_api"] = test_url(steam_api, 6)[0]
+            row["discord"] = test_url(discord, 6)[0]
+            row["discord_cdn"] = test_url(discord_cdn, 5)[0]
+            row["score"] = _tune_score(row)
             if row["score"] > best_score:
                 best_score = row["score"]
                 best = variant
             results.append(row)
-            append_gui_log(f"TUNE {variant} score={row['score']} yt={row['youtube']} steam={row['steam']} discord={row['discord']}")
+            append_gui_log(
+                f"TUNE {variant} score={row['score']} yt={row['youtube']} "
+                f"video={row['yt_video']} cdn={row['yt_cdn']} steam={row['steam']} "
+                f"api={row['steam_api']} discord={row['discord']}"
+            )
         except Exception as exc:
             row["code"] = "ERR"
             results.append(row)
             append_gui_log(f"TUNE {variant} error: {exc}")
         finally:
             stop_engine()
-        if best_score >= 115:
+        if best_score >= max_score:
             break
-    return best or "hostfakesplit", best_score, results
+
+    # повтор лучшего варианта убирает случайные единичные таймауты
+    if best and best_score < max_score:
+        row = next((r for r in results if r["variant"] == best), None)
+        if row:
+            if progress:
+                progress(f"перепроверка {best}")
+            try:
+                start_engine(profile, best, game_udp)
+                time.sleep(0.8)
+                if not row["youtube"]:
+                    ok, code, _d, _ = test_url(yt_home, 7)
+                    row["youtube"] = ok
+                    row["code"] = code
+                if row["youtube"]:
+                    if not row["yt_video"]:
+                        row["yt_video"] = test_url(yt_video, 7)[0]
+                    if not row["yt_cdn"]:
+                        row["yt_cdn"] = test_url(yt_cdn, 5)[0]
+                if not row["steam"]:
+                    row["steam"] = test_url(steam, 6)[0]
+                if not row["steam_api"]:
+                    row["steam_api"] = test_url(steam_api, 6)[0]
+                if not row["discord"]:
+                    row["discord"] = test_url(discord, 6)[0]
+                if not row["discord_cdn"]:
+                    row["discord_cdn"] = test_url(discord_cdn, 5)[0]
+                row["score"] = _tune_score(row)
+                best_score = row["score"]
+                append_gui_log(f"TUNE retest {best} score={best_score}")
+            except Exception as exc:
+                append_gui_log(f"TUNE retest {best} error: {exc}")
+            finally:
+                stop_engine()
+
+    return best or "multidisorder", best_score, results
 
 
 # --------------------------------------------------------------------------
@@ -1394,7 +1458,7 @@ class App:
 
     # ------------------------------------------------------------------ ui
     def _build(self):
-        self.root.title("Zapret Control")
+        self.root.title(f"Zapret Control v{APP_VERSION}")
         if self.offscreen:
             self.root.geometry("1040x720-2200-2200")
             try:
@@ -1466,7 +1530,7 @@ class App:
         tk.Label(header, text="обход DPI  ·  YouTube  ·  Discord  ·  Steam",
                  bg=BG, fg=MUTED, font=(FONT, 9), anchor="w").place(x=57, y=30, width=460, height=20)
 
-        tk.Label(header, text="v1.1", bg=BG, fg=DIM, font=(FONT, 8),
+        tk.Label(header, text=f"v{APP_VERSION}", bg=BG, fg=DIM, font=(FONT, 8),
                  anchor="e").place(x=944, y=18, width=64, height=24)
 
     def _build_sidebar(self):
@@ -1633,7 +1697,7 @@ class App:
         self.statusbar = tk.Label(bar, text="Готов", bg=BG2, fg=MUTED,
                                   font=(FONT, 8), anchor="w")
         self.statusbar.place(x=16, y=4, width=800, height=20)
-        tk.Label(bar, text="zapret · WinDivert · DPI desync", bg=BG2, fg=DIM,
+        tk.Label(bar, text=f"zapret · WinDivert · v{APP_VERSION}", bg=BG2, fg=DIM,
                  font=(FONT, 8), anchor="e").place(x=820, y=4, width=204, height=20)
 
     # --------------------------------------------------------------- helpers
@@ -1871,10 +1935,11 @@ class App:
 
     def _finish_tune(self, best, score, rows):
         for r in rows:
-            mark = "OK" if r["score"] >= 100 else "--"
+            mark = "OK" if r["score"] >= 170 else "--"
             self.log_write(
-                "  [%s] %-14s YouTube:%-3s Steam:%-3s Discord:%-3s score=%s"
-                % (mark, r["variant"], r["youtube"], r["steam"], r["discord"], r["score"])
+                "  [%s] %-14s YT:%s/%s/%s Steam:%s/%s Discord:%s score=%s"
+                % (mark, r["variant"], r["youtube"], r["yt_video"], r["yt_cdn"],
+                   r["steam"], r["steam_api"], r["discord"], r["score"])
             )
         self.settings["variant"] = best
         save_settings(self.settings)
@@ -1885,11 +1950,19 @@ class App:
                 "Проверьте DNS/VPN или включите другой профиль.",
                 "warn",
             )
+        elif score < 215:
+            self.log_write(
+                "Не все проверки идеальны — смотри строки выше, где стоит --.",
+                "warn",
+            )
         best_row = next((r for r in rows if r["variant"] == best), None)
         if best_row:
-            self.service_cards["youtube"].set("ok" if best_row["youtube"] else "fail", "автоподбор")
-            self.service_cards["steam"].set("ok" if best_row["steam"] else "fail", "автоподбор")
-            self.service_cards["discord"].set("ok" if best_row["discord"] else "fail", "автоподбор")
+            yt_ok = best_row["youtube"] and best_row["yt_video"]
+            st_ok = best_row["steam"] and best_row["steam_api"]
+            dc_ok = best_row["discord"] and best_row["discord_cdn"]
+            self.service_cards["youtube"].set("ok" if yt_ok else "fail", "автоподбор")
+            self.service_cards["steam"].set("ok" if st_ok else "fail", "автоподбор")
+            self.service_cards["discord"].set("ok" if dc_ok else "fail", "автоподбор")
         self.set_busy(True, "ЗАПУСК…")
         try:
             pid = start_engine(self.settings["profile"], best, bool(self.settings.get("gameUdp")))
@@ -2482,7 +2555,7 @@ def main():
     AUTOSTART = bool(args.autostart)
 
     if args.selftest:
-        lines = ["core ok", f"root = {APP_ROOT}", f"build args: {len(build_args('universal', 'hostfakesplit', False))}"]
+        lines = [f"version = {APP_VERSION}", "core ok", f"root = {APP_ROOT}", f"build args: {len(build_args('universal', 'hostfakesplit', False))}"]
         for row in diagnostics():
             lines.append(f"{row['status']:4} {row['name']}: {row['detail']}")
         text = "\n".join(lines)
