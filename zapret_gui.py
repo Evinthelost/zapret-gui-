@@ -29,7 +29,7 @@ from tkinter import messagebox, ttk
 # --------------------------------------------------------------------------
 # paths
 # --------------------------------------------------------------------------
-APP_VERSION = "1.8"
+APP_VERSION = "1.9"
 
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
@@ -101,6 +101,8 @@ VARIANT_TITLES = {
     "disorder": "disorder",
     "split2": "split2",
 }
+STRATEGY_VALUES = ["Авто"] + [VARIANT_TITLES[v] for v in VARIANTS]
+STRATEGY_TITLE_TO_KEY = {VARIANT_TITLES[v]: v for v in VARIANTS}
 
 CHECK_TARGETS = [
     ("DNS YouTube", "dns", "www.youtube.com"),
@@ -1046,6 +1048,7 @@ def auto_tune(profile, game_udp, progress=None):
         try:
             start_engine(profile, variant, game_udp)
             time.sleep(0.8)
+            flush_dns()
             ok, code, _detail, _ = test_url(yt_home, 7)
             row["youtube"] = ok
             row["code"] = code
@@ -1072,9 +1075,6 @@ def auto_tune(profile, game_udp, progress=None):
             append_gui_log(f"TUNE {variant} error: {exc}")
         finally:
             stop_engine()
-        if best_score >= max_score:
-            break
-
     # повтор лучшего варианта убирает случайные единичные таймауты
     if best and best_score < max_score:
         row = next((r for r in results if r["variant"] == best), None)
@@ -1084,6 +1084,7 @@ def auto_tune(profile, game_udp, progress=None):
             try:
                 start_engine(profile, best, game_udp)
                 time.sleep(0.8)
+                flush_dns()
                 if not row["youtube"]:
                     ok, code, _d, _ = test_url(yt_home, 7)
                     row["youtube"] = ok
@@ -1623,6 +1624,16 @@ class App:
         self.dns_combo.place(x=96, y=104, width=160, height=26)
         self.dns_combo.bind("<<ComboboxSelected>>", self.on_dns_selected)
 
+        tk.Label(card, text="Стратегия", bg=CARD2, fg=DIM, font=(FONT, 8),
+                 anchor="w").place(x=276, y=106, width=70, height=22)
+        self.strategy_var = tk.StringVar(value="Авто")
+        self.strategy_combo = ttk.Combobox(
+            card, textvariable=self.strategy_var, state="readonly",
+            style="Z.TCombobox", values=STRATEGY_VALUES,
+        )
+        self.strategy_combo.place(x=350, y=104, width=150, height=26)
+        self.strategy_combo.bind("<<ComboboxSelected>>", self.on_strategy_selected)
+
         self.btn_start = RoundedButton(card, "ЗАПУСТИТЬ", 184, 44, ACCENT, BG, ACCENT_DARK,
                                        self.start_ui, radius=11, font=(FONT, 10, "bold"),
                                        parent_bg=CARD2)
@@ -1750,6 +1761,9 @@ class App:
         self.busy = bool(busy)
         for btn in (self.btn_start, self.btn_tune, self.btn_dns, self.btn_test, self.btn_diag, self.btn_lists, self.btn_folder):
             btn.set_enabled(not busy)
+        for combo in (getattr(self, "dns_combo", None), getattr(self, "strategy_combo", None)):
+            if combo is not None:
+                combo.configure(state="disabled" if busy else "readonly")
         if busy:
             self.btn_stop.set_enabled(False)
             self.pbar.place(x=512, y=118, width=184, height=5)
@@ -1782,6 +1796,7 @@ class App:
         self.clear_checks()
         self.update_engine_visual()
         self._sync_dns_selector()
+        self._sync_strategy_selector()
         self.log_write("Zapret Control запущен")
         self.log_write("Готов. Нажми «ПРОВЕРКА», чтобы обновить статусы сервисов.")
         if self.preview:
@@ -1944,6 +1959,7 @@ class App:
             )
         self.settings["variant"] = best
         save_settings(self.settings)
+        self._sync_strategy_selector()
         self.log_write(f"Автоподбор: выбрана стратегия {best} (score {score})", "ok")
         if score < 100:
             self.log_write(
@@ -2163,6 +2179,49 @@ class App:
             self._sync_dns_selector()
             return
         self.apply_dns_choice(self.dns_var.get())
+
+    def _sync_strategy_selector(self):
+        if not hasattr(self, "strategy_combo"):
+            return
+        v = self.settings.get("variant") or "auto"
+        if v in VARIANTS:
+            self.strategy_var.set(VARIANT_TITLES[v])
+        else:
+            self.strategy_var.set("Авто")
+
+    def on_strategy_selected(self, _event=None):
+        if self.busy:
+            self._sync_strategy_selector()
+            return
+        title = self.strategy_var.get()
+        if title == "Авто":
+            self.start_tune_ui()
+            return
+        key = STRATEGY_TITLE_TO_KEY.get(title)
+        if key:
+            self.apply_variant_choice(key)
+
+    def apply_variant_choice(self, key):
+        if self.busy or key not in VARIANTS:
+            self._sync_strategy_selector()
+            return
+        self.settings["variant"] = key
+        save_settings(self.settings)
+        self.log_write(f"Стратегия: {VARIANT_TITLES[key]}", "warn")
+        if engine_running():
+            self.set_busy(True, "ПЕРЕЗАПУСК…")
+            try:
+                start_engine(self.settings["profile"], key, bool(self.settings.get("gameUdp")))
+                self.log_write("Движок перезапущен", "ok")
+            except Exception as exc:
+                self.log_write(f"Ошибка перезапуска: {exc}", "err")
+                messagebox.showerror("Zapret Control", str(exc), parent=self.root)
+            finally:
+                self.set_busy(False)
+                self.update_engine_visual()
+        else:
+            self.update_engine_visual()
+        self._sync_strategy_selector()
 
     def apply_dns_choice(self, name):
         if name == "Свой":
