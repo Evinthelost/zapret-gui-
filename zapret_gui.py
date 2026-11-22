@@ -29,11 +29,12 @@ from tkinter import messagebox, ttk
 # --------------------------------------------------------------------------
 # paths
 # --------------------------------------------------------------------------
+APP_VERSION = "1.7"
+
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
 else:
-    APP_VERSION = "1.6"
-APP_ROOT = Path(__file__).resolve().parent
+    APP_ROOT = Path(__file__).resolve().parent
 BIN = APP_ROOT / "bin"
 LISTS = APP_ROOT / "lists"
 UTILS = APP_ROOT / "utils"
