@@ -1247,7 +1247,7 @@ class ProfileCard(tk.Canvas):
         self.command = command
         self.selected = False
         self.rect = round_rect(self, 1, 1, 223, 57, 10, fill=CARD2, outline=BORDER)
-        self.bar = round_rect(self, 6, 12, 10, 46, 2, fill=ACCENT, outline="")
+        self.bar = self.create_rectangle(6, 12, 10, 46, fill=ACCENT, outline="")
         self.itemconfigure(self.bar, state="hidden")
         self.title = self.create_text(20, 19, text=title, anchor="w",
                                       fill=TEXT, font=(FONT, 10, "bold"))
@@ -1273,7 +1273,7 @@ class ProfileCard(tk.Canvas):
         self.itemconfigure(
             self.rect,
             fill=CARD_SEL if selected else CARD2,
-            outline=ACCENT if selected else BORDER,
+            outline="#1f3a31" if selected else BORDER,
         )
         self.itemconfigure(self.title, fill=ACCENT if selected else TEXT)
         self.itemconfigure(self.sub, fill="#aac8be" if selected else MUTED)
@@ -1311,6 +1311,34 @@ class CheckRow:
             self.detail.configure(text=detail)
 
 
+class ServiceCard(tk.Canvas):
+    def __init__(self, parent, key, title, x, y, w=168, h=132, subtitle="не проверено"):
+        super().__init__(parent, width=w, height=h, bg=CARD2,
+                         highlightthickness=0, bd=0)
+        self.key = key
+        self.rect = round_rect(self, 1, 1, w - 1, h - 1, 12,
+                               fill="#171b24", outline=BORDER)
+        self.dot = self.create_oval(18, 20, 30, 32, fill=DIM, outline="")
+        self.title = self.create_text(40, 26, text=title, anchor="w",
+                                      fill=TEXT, font=(FONT, 10, "bold"))
+        self.status = self.create_text(18, 56, text="—", anchor="nw",
+                                       fill=DIM, font=(FONT, 20, "bold"))
+        self.detail = self.create_text(18, 94, text=subtitle, anchor="nw",
+                                       fill=DIM, font=(FONT, 8), width=w - 30)
+        self.place(x=x, y=y, width=w, height=h)
+
+    def set(self, state, detail=None, status_text=None):
+        colors = {"ok": ACCENT, "fail": DANGER, "pending": WARN, "idle": DIM}
+        labels = {"ok": "OK", "fail": "FAIL", "pending": "…", "idle": "—"}
+        color = colors.get(state, DIM)
+        self.itemconfigure(self.dot, fill=color)
+        self.itemconfigure(self.status, text=status_text or labels.get(state, "—"),
+                           fill=color if state != "idle" else DIM)
+        if detail is not None:
+            self.itemconfigure(self.detail, text=detail,
+                               fill=MUTED if state != "idle" else DIM)
+
+
 def make_icon():
     """Простая иконка: зелёный круг с чёрной Z."""
     img = tk.PhotoImage(width=32, height=32)
@@ -1333,15 +1361,15 @@ def make_icon():
 # main app
 # --------------------------------------------------------------------------
 class App:
-    def __init__(self, root, preview=False):
+    def __init__(self, root, preview=False, offscreen=False):
         self.root = root
         self.preview = preview
+        self.offscreen = offscreen
         self.settings = load_settings()
         self.busy = False
         self.queue = queue.Queue()
         self.cards = {}
         self.toggles = {}
-        self.check_rows = []
         self.log_pos = {"out": 0, "err": 0}
         self.last_visual = 0
         self._build()
@@ -1352,7 +1380,14 @@ class App:
     # ------------------------------------------------------------------ ui
     def _build(self):
         self.root.title("Zapret Control")
-        self.root.geometry("1040x720")
+        if self.offscreen:
+            self.root.geometry("1040x720-2200-2200")
+            try:
+                self.root.attributes("-toolwindow", True)
+            except Exception:
+                pass
+        else:
+            self.root.geometry("1040x720")
         self.root.resizable(False, False)
         self.root.configure(bg=BG)
         try:
@@ -1393,7 +1428,7 @@ class App:
 
         logo = tk.Canvas(header, width=44, height=44, bg=BG, highlightthickness=0)
         logo.place(x=0, y=4)
-        round_rect(logo, 2, 2, 42, 42, 12, fill=ACCENT, outline="")
+        logo.create_oval(2, 2, 42, 42, fill=ACCENT, outline=ACCENT)
         logo.create_text(22, 22, text="Z", fill=BG, font=(FONT, 20, "bold"))
 
         tk.Label(header, text="ZAPRET CONTROL", bg=BG, fg=TEXT,
@@ -1401,17 +1436,6 @@ class App:
         tk.Label(header, text="обход DPI  ·  YouTube  ·  Discord  ·  Steam",
                  bg=BG, fg=MUTED, font=(FONT, 9), anchor="w").place(x=57, y=30, width=460, height=20)
 
-        self.admin_badge = tk.Label(
-            header,
-            text="ADMIN" if is_admin() else "GUEST",
-            bg=CARD2,
-            fg=ACCENT if is_admin() else MUTED,
-            font=(FONT, 8, "bold"),
-            anchor="center",
-            highlightbackground=BORDER,
-            highlightthickness=1,
-        )
-        self.admin_badge.place(x=848, y=18, width=84, height=24)
         tk.Label(header, text="v1.1", bg=BG, fg=DIM, font=(FONT, 8),
                  anchor="e").place(x=944, y=18, width=64, height=24)
 
@@ -1475,7 +1499,9 @@ class App:
         card.place(x=14, y=14)
         round_rect(card, 1, 1, 711, 141, 12, fill=CARD2, outline=BORDER)
         self.status_card = card
-        self.status_bar_item = round_rect(card, 7, 14, 11, 128, 2, fill=MUTED, outline="")
+        self.status_bar_item = card.create_rectangle(
+            7, 14, 11, 128, fill=MUTED, outline=""
+        )
 
         self.status_dot = tk.Canvas(card, width=24, height=24, bg=CARD2, highlightthickness=0)
         self.status_dot.place(x=22, y=28)
@@ -1504,39 +1530,46 @@ class App:
         self.pbar.place(x=512, y=118, width=184, height=5)
         self.pbar.place_forget()
 
-        # actions (5 equal buttons)
-        def action(text, x, command, fg=TEXT):
-            b = RoundedButton(main, text, 136, 38, CARD2, fg, HOVER, command,
+        # actions: 4 equal buttons
+        def action(text, x, command):
+            b = RoundedButton(main, text, 172, 36, CARD2, TEXT, HOVER, command,
                               radius=9, font=(FONT, 8, "bold"), parent_bg=CARD)
             b.place(x=x, y=166)
             return b
 
         self.btn_tune = action("АВТОПОДБОР", 14, self.start_tune_ui)
-        self.btn_dns = action("DNS-ПОДБОР", 158, self.start_dns_tune_ui)
-        self.btn_test = action("ПРОВЕРКА", 302, self.start_test_ui)
-        self.btn_diag = action("ДИАГНОСТИКА", 446, self.start_diag_ui)
-        self.btn_log = action("ЛОГ", 590, self.toggle_log, MUTED)
+        self.btn_dns = action("DNS-ПОДБОР", 194, self.start_dns_tune_ui)
+        self.btn_test = action("ПРОВЕРКА", 374, self.start_test_ui)
+        self.btn_diag = action("ДИАГНОСТИКА", 554, self.start_diag_ui)
 
-        # checks
-        checks = tk.Canvas(main, width=712, height=232, bg=CARD,
-                           highlightthickness=0, bd=0)
-        checks.place(x=14, y=214)
-        round_rect(checks, 1, 1, 711, 231, 12, fill=CARD2, outline=BORDER)
-        self.checks_frame = checks
-        tk.Label(checks, text="ПРОВЕРКА СОЕДИНЕНИЯ", bg=CARD2, fg=DIM,
+        # services
+        services = tk.Canvas(main, width=712, height=190, bg=CARD,
+                             highlightthickness=0, bd=0)
+        services.place(x=14, y=214)
+        round_rect(services, 1, 1, 711, 189, 12, fill=CARD2, outline=BORDER)
+        self.checks_frame = services
+        tk.Label(services, text="СЕРВИСЫ", bg=CARD2, fg=DIM,
                  font=(FONT, 8, "bold"), anchor="w").place(x=18, y=10, width=300, height=18)
-        self.checks_hint = tk.Label(checks, text="нажмите «Проверка»", bg=CARD2,
-                                    fg=DIM, font=(FONT, 8), anchor="e")
-        self.checks_hint.place(x=440, y=10, width=252, height=18)
-        for i, (name, _kind, _value) in enumerate(CHECK_TARGETS):
-            self.check_rows.append(CheckRow(checks, 36 + i * 24, name))
+
+        self.service_cards = {}
+        dns_name = self.settings.get("dnsName") or "не проверено"
+        cards = [
+            ("dns", "DNS", dns_name),
+            ("youtube", "YouTube", "web + CDN"),
+            ("steam", "Steam", "store · community · help"),
+            ("discord", "Discord", "api · cdn"),
+        ]
+        for i, (key, title, subtitle) in enumerate(cards):
+            card = ServiceCard(services, key, title, 2 + i * 180, 36,
+                               w=168, h=132, subtitle=subtitle)
+            self.service_cards[key] = card
 
         # log
-        self.log_card = tk.Canvas(main, width=712, height=142, bg=CARD,
+        self.log_card = tk.Canvas(main, width=712, height=176, bg=CARD,
                                   highlightthickness=0, bd=0)
-        self.log_card.place(x=14, y=454)
-        round_rect(self.log_card, 1, 1, 711, 141, 12, fill=CARD2, outline=BORDER)
-        tk.Label(self.log_card, text="ЛОГ ДВИЖКА", bg=CARD2, fg=DIM,
+        self.log_card.place(x=14, y=414)
+        round_rect(self.log_card, 1, 1, 711, 175, 12, fill=CARD2, outline=BORDER)
+        tk.Label(self.log_card, text="ЛОГ", bg=CARD2, fg=DIM,
                  font=(FONT, 8, "bold"), anchor="w").place(x=18, y=8, width=200, height=18)
         self.btn_clear = RoundedButton(self.log_card, "очистить", 74, 22, CARD, MUTED, HOVER,
                                        self.clear_log, radius=6, font=(FONT, 8),
@@ -1546,7 +1579,7 @@ class App:
         self.log = tk.Text(self.log_card, bg=BG2, fg="#9aa3b2", bd=0,
                            highlightthickness=0, font=(MONO, 9), wrap="word",
                            padx=6, pady=4, state="disabled")
-        self.log.place(x=14, y=34, width=682, height=96)
+        self.log.place(x=14, y=34, width=682, height=130)
         self.log.tag_configure("dim", foreground=DIM)
         self.log.tag_configure("text", foreground="#b4bcc9")
         self.log.tag_configure("ok", foreground=ACCENT)
@@ -1583,15 +1616,6 @@ class App:
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-
-    def toggle_log(self):
-        if self.log_card.winfo_ismapped():
-            self.log_card.place_forget()
-            self.btn_log.set_text("ЛОГ")
-        else:
-            self.log_card.place(x=14, y=454)
-            self.log_card.lift()
-            self.btn_log.set_text("СКРЫТЬ")
 
     def open_path(self, path):
         try:
@@ -1652,8 +1676,9 @@ class App:
         self.clear_checks()
         self.update_engine_visual()
         self.log_write("Zapret Control запущен")
+        self.log_write("Готов. Нажми «ПРОВЕРКА», чтобы обновить статусы сервисов.")
         if self.preview:
-            self.root.after(3200, self._preview_close)
+            self.root.after(5000, self._preview_close)
             return
         if AUTOSTART:
             self.root.after(1200, self.root.iconify)
@@ -1710,10 +1735,12 @@ class App:
                 % (self.selected_profile_title(), self.variant_title()),
                 "PID %s  ·  WinDivert активен" % ", ".join(map(str, pids)),
             )
+            self.btn_start.set_text("ПЕРЕЗАПУСТИТЬ")
             self.btn_start.set_enabled(True)
             self.btn_stop.set_enabled(True)
         else:
             self.set_status("off", "ОСТАНОВЛЕН", "Движок не запущен")
+            self.btn_start.set_text("ЗАПУСТИТЬ")
             self.btn_start.set_enabled(True)
             self.btn_stop.set_enabled(False)
 
@@ -1783,9 +1810,8 @@ class App:
             finally:
                 self.set_busy(False)
         self.set_busy(True, "ПОДБОР СТРАТЕГИИ…")
-        for row in self.check_rows:
-            row.set(False, "—", pending=True)
-        self.checks_hint.configure(text="идёт перебор стратегий")
+        for key in ("youtube", "steam", "discord"):
+            self.service_cards[key].set("pending", "подбор…")
         self.log_write("Автоподбор: перебираю стратегии…", "warn")
         threading.Thread(target=self._tune_worker, daemon=True).start()
 
@@ -1816,7 +1842,11 @@ class App:
                 "Проверьте DNS/VPN или включите другой профиль.",
                 "warn",
             )
-        self.checks_hint.configure(text="проверьте связь кнопкой ниже")
+        best_row = next((r for r in rows if r["variant"] == best), None)
+        if best_row:
+            self.service_cards["youtube"].set("ok" if best_row["youtube"] else "fail", "автоподбор")
+            self.service_cards["steam"].set("ok" if best_row["steam"] else "fail", "автоподбор")
+            self.service_cards["discord"].set("ok" if best_row["discord"] else "fail", "автоподбор")
         self.set_busy(True, "ЗАПУСК…")
         try:
             pid = start_engine(self.settings["profile"], best, bool(self.settings.get("gameUdp")))
@@ -1830,18 +1860,17 @@ class App:
 
     # --------------------------------------------------------------- tests
     def clear_checks(self):
-        for row in self.check_rows:
-            row.set(False, "—", pending=False)
-            row.status.configure(text="—", fg=DIM)
-            row.dot.itemconfigure(row.oval, fill=DIM)
+        self.service_cards["dns"].set("idle", self.settings.get("dnsName") or "не проверено")
+        self.service_cards["youtube"].set("idle", "web + CDN")
+        self.service_cards["steam"].set("idle", "store · community · help")
+        self.service_cards["discord"].set("idle", "api · cdn")
 
     def start_test_ui(self):
         if self.busy:
             return
         self.set_busy(True, "ПРОВЕРКА СВЯЗИ…")
-        for row in self.check_rows:
-            row.set(False, "проверяю", pending=True)
-        self.checks_hint.configure(text="проверяю…")
+        for card in self.service_cards.values():
+            card.set("pending", "проверяю…")
         self.log_write("--- проверка соединения ---")
         threading.Thread(target=self._test_worker, daemon=True).start()
 
@@ -1851,20 +1880,40 @@ class App:
         except Exception as exc:
             self.queue.put(("test_error", str(exc)))
 
-    def update_check_rows(self, results):
-        for i, r in enumerate(results):
-            if i < len(self.check_rows):
-                self.check_rows[i].set(r["ok"], r["detail"])
+    def update_service_cards(self, results):
+        if not results:
+            return
+
+        def item(i):
+            return results[i] if i < len(results) else None
+
+        dns = item(0)
+        if dns:
+            self.service_cards["dns"].set("ok" if dns["ok"] else "fail", dns["detail"])
+
+        def group(key, indexes, ok_detail):
+            items = [item(i) for i in indexes]
+            items = [x for x in items if x]
+            if not items:
+                return
+            ok = all(x["ok"] for x in items)
+            detail = ok_detail if ok else next(
+                (x["detail"] for x in items if not x["ok"]), ok_detail
+            )
+            self.service_cards[key].set("ok" if ok else "fail", detail)
+
+        group("youtube", (1, 2), "web + CDN")
+        group("steam", (3, 4, 5), "store · community · help")
+        group("discord", (6, 7), "api · cdn")
 
     def _finish_test(self, results):
         ok_count = 0
-        self.update_check_rows(results)
+        self.update_service_cards(results)
         for r in results:
             if r["ok"]:
                 ok_count += 1
             self.log_write("  %-16s %-5s %s" % (r["id"], "OK" if r["ok"] else "FAIL", r["detail"]),
                            "ok" if r["ok"] else "err")
-        self.checks_hint.configure(text=f"{ok_count} из {len(results)} OK")
         self.set_statusbar(f"Проверка: {ok_count} из {len(results)} OK")
         self.set_busy(False)
         self.update_engine_visual()
@@ -1904,8 +1953,9 @@ class App:
         self.settings = load_settings()
         if "dnsFix" in self.toggles:
             self.toggles["dnsFix"].set_value(True)
-        self.update_check_rows(res.get("checks", []))
-        self.checks_hint.configure(text="DNS: " + res["name"])
+        self.update_service_cards(res.get("checks", []))
+        if not res.get("checks"):
+            self.service_cards["dns"].set("ok", f"{res['name']} · {res['primary']}")
         self.set_statusbar(
             "DNS: %s · %s / %s · проверки %s/%s"
             % (res["name"], res["primary"], res["secondary"], res["url_ok"], res["url_total"])
@@ -2099,9 +2149,13 @@ class App:
                     self.log_pos[key] = f.tell()
                 text = data.decode("utf-8", errors="replace")
                 text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+                skip = (
+                    "loading ", "loaded ", "we have ", "github version",
+                    "windivert initialized", "windivert ", "capture is started",
+                )
                 for line in text.splitlines():
                     line = line.strip()
-                    if line:
+                    if line and not line.lower().startswith(skip):
                         self.log_write("[winws] " + line)
             except Exception:
                 pass
@@ -2139,6 +2193,9 @@ def set_dark_titlebar(root):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), 4)
         value = ctypes.c_int(2)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(value), 4)
+        for attr, color in ((35, 0x00120D0B), (36, 0x00F0EBE8), (34, 0x00392C27)):
+            c = ctypes.c_uint(color)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(c), 4)
     except Exception:
         pass
 
@@ -2192,6 +2249,7 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-autostart", "--autostart", action="store_true")
     parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--offscreen", action="store_true")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--no-elevate", action="store_true")
     args, _unknown = parser.parse_known_args()
@@ -2231,7 +2289,7 @@ def main():
         return
 
     root = tk.Tk()
-    app = App(root, preview=args.preview)
+    app = App(root, preview=args.preview, offscreen=args.offscreen)
     try:
         root.mainloop()
     except KeyboardInterrupt:
