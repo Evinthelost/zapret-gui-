@@ -29,7 +29,7 @@ from tkinter import messagebox, ttk
 # --------------------------------------------------------------------------
 # paths
 # --------------------------------------------------------------------------
-APP_VERSION = "1.7"
+APP_VERSION = "1.8"
 
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
@@ -82,11 +82,11 @@ PROFILES = {
 }
 
 VARIANTS = [
-    "hostfakesplit",
+    "multidisorder",
     "fakemultisplit",
+    "hostfakesplit",
     "multisplit652",
     "fake",
-    "multidisorder",
     "disorder",
     "split2",
 ]
