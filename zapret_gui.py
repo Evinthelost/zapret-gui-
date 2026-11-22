@@ -7,6 +7,7 @@ Python 3.9+ / tkinter, без внешних зависимостей.
 
 import argparse
 import ctypes
+import ipaddress
 import json
 import os
 import queue
@@ -504,10 +505,20 @@ def set_youtube_dns():
         s.get("dnsSecondary") or "",
     )
     allowed = {primary for _, primary, _ in DNS_SERVERS}
+    custom = saved[0] == "Свой" and bool(saved[1])
+    if custom:
+        allowed.add(saved[1])
     if (saved[1] in allowed and saved[1] in ad["dns"]
             and system_resolves("www.youtube.com")
             and system_resolves("steamcommunity.com")):
         return True, f"DNS {saved[0]} уже активен · ключевые домены резолвятся"
+
+    if custom:
+        apply_dns_pair(ad, saved[1], saved[2])
+        if system_resolves("www.youtube.com"):
+            s["dnsFix"] = True
+            save_settings(s)
+            return True, f"DNS Свой · {saved[1]}" + (f" / {saved[2]}" if saved[2] else "")
 
     candidates = []
     if saved[1] in allowed:
@@ -1537,7 +1548,7 @@ class App:
         self.dns_combo = ttk.Combobox(
             card, textvariable=self.dns_var, state="readonly",
             style="Z.TCombobox",
-            values=["Авто"] + list(DNS_BY_NAME.keys()) + ["Системный (сброс)"],
+            values=["Авто"] + list(DNS_BY_NAME.keys()) + ["Свой", "Системный (сброс)"],
         )
         self.dns_combo.place(x=96, y=104, width=160, height=26)
         self.dns_combo.bind("<<ComboboxSelected>>", self.on_dns_selected)
@@ -2061,7 +2072,12 @@ class App:
             self.dns_var.set("Системный (сброс)")
             return
         name = self.settings.get("dnsName") or ""
-        self.dns_var.set(name if name in DNS_BY_NAME else "Авто")
+        if name == "Свой" and self.settings.get("dnsPrimary"):
+            self.dns_var.set("Свой")
+        elif name in DNS_BY_NAME:
+            self.dns_var.set(name)
+        else:
+            self.dns_var.set("Авто")
 
     def on_dns_selected(self, _event=None):
         if self.busy:
@@ -2070,6 +2086,9 @@ class App:
         self.apply_dns_choice(self.dns_var.get())
 
     def apply_dns_choice(self, name):
+        if name == "Свой":
+            self.show_custom_dns_dialog()
+            return
         if name == "Системный (сброс)":
             self.settings["dnsFix"] = False
             save_settings(self.settings)
@@ -2120,10 +2139,116 @@ class App:
         self.set_statusbar(detail)
         self._sync_dns_selector()
 
+    def apply_custom_dns(self, primary, secondary):
+        ad = get_best_adapter()
+        if not ad or not ad["name"]:
+            return False, "не найден активный сетевой адаптер"
+        apply_dns_pair(ad, primary, secondary)
+        ok_y = system_resolves("www.youtube.com")
+        ok_s = system_resolves("steamcommunity.com")
+        self.settings["dnsFix"] = True
+        self.settings["dnsName"] = "Свой"
+        self.settings["dnsPrimary"] = primary
+        self.settings["dnsSecondary"] = secondary
+        save_settings(self.settings)
+        self.toggles["dnsFix"].set_value(True)
+        detail = f"DNS Свой · {primary}" + (f" / {secondary}" if secondary else "")
+        if ok_y and ok_s:
+            detail += " · ключевые домены резолвятся"
+            self.log_write(detail, "ok")
+        elif ok_y:
+            detail += " · YouTube OK, Steam не резолвится"
+            self.log_write(detail, "warn")
+        else:
+            detail += " · YouTube не резолвится"
+            self.log_write(detail, "warn")
+        self.set_statusbar(detail)
+        self._sync_dns_selector()
+        return ok_y, detail
+
+    def show_custom_dns_dialog(self):
+        if self.busy:
+            return
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Свой DNS")
+        dlg.configure(bg=BG)
+        dlg.geometry("470x300")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        try:
+            set_dark_titlebar(dlg)
+        except Exception:
+            pass
+
+        tk.Label(dlg, text="СВОЙ DNS", bg=BG, fg=TEXT,
+                 font=(FONT, 12, "bold"), anchor="w").place(x=20, y=16, width=300, height=26)
+        tk.Label(dlg, text="Любые IPv4. Резервный можно оставить пустым.",
+                 bg=BG, fg=MUTED, font=(FONT, 8), anchor="w").place(x=20, y=44, width=420, height=18)
+
+        custom_saved = self.settings.get("dnsName") == "Свой"
+        pv = tk.StringVar(value=(self.settings.get("dnsPrimary") if custom_saved else "") or "9.9.9.9")
+        sv = tk.StringVar(value=(self.settings.get("dnsSecondary") if custom_saved else "") or "149.112.112.112")
+
+        def add_entry(y, label, var):
+            tk.Label(dlg, text=label, bg=BG, fg=MUTED, font=(FONT, 9),
+                     anchor="w").place(x=20, y=y, width=110, height=24)
+            ent = tk.Entry(dlg, textvariable=var, bg=CARD2, fg=TEXT,
+                           insertbackground=TEXT, relief="flat",
+                           highlightthickness=1, highlightbackground=BORDER,
+                           highlightcolor=ACCENT, font=(FONT, 10))
+            ent.place(x=140, y=y, width=300, height=30)
+
+        add_entry(80, "Основной", pv)
+        add_entry(130, "Резервный", sv)
+
+        def apply():
+            def valid(v):
+                if not v:
+                    return True
+                try:
+                    return ipaddress.ip_address(v).version == 4
+                except Exception:
+                    return False
+            primary = pv.get().strip()
+            secondary = sv.get().strip()
+            if not primary:
+                messagebox.showerror("Zapret Control", "Основной DNS не может быть пустым.", parent=dlg)
+                return
+            if not valid(primary) or not valid(secondary):
+                messagebox.showerror("Zapret Control", "Введи корректный IPv4-адрес.", parent=dlg)
+                return
+            ok, detail = self.apply_custom_dns(primary, secondary)
+            if ok:
+                dlg.grab_release()
+                dlg.destroy()
+            else:
+                messagebox.showwarning("Zapret Control", detail, parent=dlg)
+
+        def cancel():
+            dlg.grab_release()
+            dlg.destroy()
+            self._sync_dns_selector()
+
+        RoundedButton(dlg, "ПРИМЕНИТЬ", 180, 36, ACCENT, BG, ACCENT_DARK,
+                      apply, radius=8, font=(FONT, 9, "bold"),
+                      parent_bg=BG).place(x=20, y=220)
+        RoundedButton(dlg, "ОТМЕНА", 120, 36, CARD2, TEXT, HOVER,
+                      cancel, radius=8, font=(FONT, 9),
+                      parent_bg=BG).place(x=320, y=220)
+        dlg.protocol("WM_DELETE_WINDOW", cancel)
+
     def on_dns_toggle(self, value):
         if value:
             name = self.dns_var.get() if hasattr(self, "dns_var") else "Авто"
-            if name in DNS_BY_NAME:
+            if name == "Свой":
+                primary = self.settings.get("dnsPrimary")
+                secondary = self.settings.get("dnsSecondary")
+                if primary:
+                    self.apply_custom_dns(primary, secondary)
+                else:
+                    self.show_custom_dns_dialog()
+            elif name in DNS_BY_NAME:
                 self.apply_dns_choice(name)
             else:
                 self.apply_dns_choice("Авто")
