@@ -1,6 +1,6 @@
 # Zapret Control
 
-Нормальный GUI для zapret на Windows: YouTube, Discord, Steam и Dota без терминала и без Python.
+Нормальный GUI для zapret на Windows: YouTube, Discord, Steam без терминала и без Python.
 
 ![Windows](https://img.shields.io/badge/Windows-10%2F11%20x64-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB)
