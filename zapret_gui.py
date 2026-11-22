@@ -414,14 +414,12 @@ def system_resolves(name="www.youtube.com"):
 # DNS fix
 # --------------------------------------------------------------------------
 DNS_SERVERS = [
-    ("VK / Mail.ru", "76.76.2.0", "76.76.10.0"),
-    ("SafeDNS", "195.46.39.39", "195.46.39.40"),
-    ("AdGuard DNS", "94.140.14.14", "94.140.15.15"),
-    ("Yandex", "77.88.8.8", "77.88.8.1"),
     ("Quad9", "9.9.9.9", "149.112.112.112"),
     ("Cloudflare", "1.1.1.1", "1.0.0.1"),
     ("Google", "8.8.8.8", "8.8.4.4"),
+    ("Yandex", "77.88.8.8", "77.88.8.1"),
 ]
+DNS_BY_NAME = {name: (primary, secondary) for name, primary, secondary in DNS_SERVERS}
 
 DNS_HOSTS = [
     "www.youtube.com",
@@ -505,13 +503,14 @@ def set_youtube_dns():
         s.get("dnsPrimary") or "",
         s.get("dnsSecondary") or "",
     )
-    if (saved[1] and saved[1] in ad["dns"]
+    allowed = {primary for _, primary, _ in DNS_SERVERS}
+    if (saved[1] in allowed and saved[1] in ad["dns"]
             and system_resolves("www.youtube.com")
             and system_resolves("steamcommunity.com")):
         return True, f"DNS {saved[0]} уже активен · ключевые домены резолвятся"
 
     candidates = []
-    if saved[1]:
+    if saved[1] in allowed:
         candidates.append(saved)
     candidates.extend(DNS_SERVERS)
 
@@ -1413,6 +1412,21 @@ class App:
                         background=CARD2, troughcolor=BG2,
                         bordercolor=BG2, arrowcolor=MUTED,
                         lightcolor=CARD2, darkcolor=CARD2)
+        style.configure("Z.TCombobox",
+                        fieldbackground=CARD2, background=CARD2, foreground=TEXT,
+                        arrowcolor=MUTED, bordercolor=BORDER,
+                        lightcolor=CARD2, darkcolor=CARD2, padding=2,
+                        font=(FONT, 9))
+        style.map("Z.TCombobox",
+                  fieldbackground=[("readonly", CARD2)],
+                  foreground=[("readonly", TEXT)],
+                  background=[("readonly", CARD2)],
+                  selectbackground=[("readonly", CARD_SEL)],
+                  selectforeground=[("readonly", TEXT)])
+        self.root.option_add("*TCombobox*Listbox.background", CARD2)
+        self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", CARD_SEL)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", TEXT)
 
         self._build_header()
         self._build_sidebar()
@@ -1516,6 +1530,17 @@ class App:
         self.status_info = tk.Label(card, text="", bg=CARD2, fg=DIM,
                                     font=(FONT, 8), anchor="w")
         self.status_info.place(x=56, y=84, width=440, height=18)
+
+        tk.Label(card, text="DNS", bg=CARD2, fg=DIM, font=(FONT, 8),
+                 anchor="w").place(x=56, y=106, width=36, height=22)
+        self.dns_var = tk.StringVar(value="Авто")
+        self.dns_combo = ttk.Combobox(
+            card, textvariable=self.dns_var, state="readonly",
+            style="Z.TCombobox",
+            values=["Авто"] + list(DNS_BY_NAME.keys()) + ["Системный (сброс)"],
+        )
+        self.dns_combo.place(x=96, y=104, width=160, height=26)
+        self.dns_combo.bind("<<ComboboxSelected>>", self.on_dns_selected)
 
         self.btn_start = RoundedButton(card, "ЗАПУСТИТЬ", 184, 44, ACCENT, BG, ACCENT_DARK,
                                        self.start_ui, radius=11, font=(FONT, 10, "bold"),
@@ -1675,6 +1700,7 @@ class App:
             card.set_selected(key == self.settings["profile"])
         self.clear_checks()
         self.update_engine_visual()
+        self._sync_dns_selector()
         self.log_write("Zapret Control запущен")
         self.log_write("Готов. Нажми «ПРОВЕРКА», чтобы обновить статусы сервисов.")
         if self.preview:
@@ -1710,6 +1736,7 @@ class App:
             ok, detail = restore_youtube_dns()
             self.log_write(detail)
         self.settings = load_settings()
+        self._sync_dns_selector()
         dns_name = self.settings.get("dnsName") or "авто"
         self.set_statusbar(
             "Профиль: %s · Teredo %s · DNS %s (%s)"
@@ -1951,6 +1978,7 @@ class App:
             "DNS выбран: %s · %s / %s" % (res["name"], res["primary"], res["secondary"]), "ok"
         )
         self.settings = load_settings()
+        self._sync_dns_selector()
         if "dnsFix" in self.toggles:
             self.toggles["dnsFix"].set_value(True)
         self.update_service_cards(res.get("checks", []))
@@ -2026,20 +2054,88 @@ class App:
                       radius=8, font=(FONT, 9), parent_bg=BG).place(x=500, y=420)
 
     # --------------------------------------------------------------- toggles
-    def on_dns_toggle(self, value):
-        self.settings["dnsFix"] = bool(value)
-        save_settings(self.settings)
-        if value:
-            ok, detail = set_youtube_dns()
-            self.log_write(detail, "ok" if ok else "warn")
-            if not ok:
-                self.settings["dnsFix"] = False
-                save_settings(self.settings)
-                self.toggles["dnsFix"].set_value(False)
-                messagebox.showerror("Zapret Control", f"DNS-фикс не сработал:\n{detail}", parent=self.root)
-        else:
+    def _sync_dns_selector(self):
+        if not hasattr(self, "dns_combo"):
+            return
+        if not self.settings.get("dnsFix", True):
+            self.dns_var.set("Системный (сброс)")
+            return
+        name = self.settings.get("dnsName") or ""
+        self.dns_var.set(name if name in DNS_BY_NAME else "Авто")
+
+    def on_dns_selected(self, _event=None):
+        if self.busy:
+            self._sync_dns_selector()
+            return
+        self.apply_dns_choice(self.dns_var.get())
+
+    def apply_dns_choice(self, name):
+        if name == "Системный (сброс)":
+            self.settings["dnsFix"] = False
+            save_settings(self.settings)
+            self.toggles["dnsFix"].set_value(False)
             ok, detail = restore_youtube_dns()
             self.log_write(detail, "ok" if ok else "warn")
+            self.settings = load_settings()
+            self._sync_dns_selector()
+            return
+
+        if name == "Авто":
+            ok, detail = set_youtube_dns()
+            self.log_write(detail, "ok" if ok else "warn")
+            self.settings = load_settings()
+            self.toggles["dnsFix"].set_value(bool(self.settings.get("dnsFix", True)))
+            self._sync_dns_selector()
+            if not ok:
+                messagebox.showerror("Zapret Control", "DNS не подобран: " + detail, parent=self.root)
+            return
+
+        if name not in DNS_BY_NAME:
+            self._sync_dns_selector()
+            return
+
+        primary, secondary = DNS_BY_NAME[name]
+        ad = get_best_adapter()
+        if not ad or not ad["name"]:
+            messagebox.showerror("Zapret Control", "Не найден активный сетевой адаптер", parent=self.root)
+            self._sync_dns_selector()
+            return
+
+        apply_dns_pair(ad, primary, secondary)
+        ok_y = system_resolves("www.youtube.com")
+        ok_s = system_resolves("steamcommunity.com")
+        self.settings["dnsFix"] = True
+        self.settings["dnsName"] = name
+        self.settings["dnsPrimary"] = primary
+        self.settings["dnsSecondary"] = secondary
+        save_settings(self.settings)
+        self.toggles["dnsFix"].set_value(True)
+        detail = f"DNS {name} · {primary} / {secondary}"
+        if ok_y and ok_s:
+            detail += " · ключевые домены резолвятся"
+            self.log_write(detail, "ok")
+        else:
+            detail += " · ВНИМАНИЕ: youtube/steam не резолвятся"
+            self.log_write(detail, "warn")
+        self.set_statusbar(detail)
+        self._sync_dns_selector()
+
+    def on_dns_toggle(self, value):
+        if value:
+            name = self.dns_var.get() if hasattr(self, "dns_var") else "Авто"
+            if name in DNS_BY_NAME:
+                self.apply_dns_choice(name)
+            else:
+                self.apply_dns_choice("Авто")
+        else:
+            self.settings["dnsFix"] = False
+            save_settings(self.settings)
+            if hasattr(self, "dns_var"):
+                self.dns_var.set("Системный (сброс)")
+            ok, detail = restore_youtube_dns()
+            self.log_write(detail, "ok" if ok else "warn")
+            self.settings = load_settings()
+            self._sync_dns_selector()
 
     def on_tunnels_toggle(self, value):
         self.settings["tunnels"] = bool(value)

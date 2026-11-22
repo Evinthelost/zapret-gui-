@@ -12,7 +12,9 @@
 
 **Готовая сборка (Python не нужен):**
 
-[Zapret-Control-Windows.zip](release/Zapret-Control-Windows.zip)
+[Zapret-Control-Windows.zip](https://github.com/Evinthelost/zapret-gui-/releases/latest/download/Zapret-Control-Windows.zip)
+
+Зеркало в репозитории: [release/Zapret-Control-Windows.zip](release/Zapret-Control-Windows.zip)
 
 Либо: `Code` → `Download ZIP`, внутри архива открой `release/Zapret-Control-Windows.zip`.
 
@@ -28,7 +30,7 @@ Python, pip и зависимости для запуска **не нужны**.
 ## Что умеет
 
 - **АВТОПОДБОР** — перебирает 7 стратегий обхода DPI (`hostfakesplit`, `fake+multisplit`, `multidisorder` и др.) и выбирает ту, с которой работают YouTube, Steam и Discord.
-- **DNS-ПОДБОР** — проверяет российские DNS (VK/Mail.ru, SafeDNS, AdGuard, Yandex), затем резервные (Quad9, Cloudflare, Google), и ставит тот, с которым резолвятся YouTube, Steam и Discord.
+- **DNS-ПОДБОР** — проверяет Quad9, Cloudflare, Google и Yandex и ставит тот, с которым резолвятся YouTube, Steam и Discord. VK/Mail.ru, SafeDNS и AdGuard в список больше не входят.
 - **ПРОВЕРКА** — DNS, YouTube, YouTube CDN, Steam Store, Steam Community, Steam Help, Discord, Discord CDN.
 - Профили: Универсальный, YouTube, Discord, Steam + Dota, Максимум.
 - Тумблеры: DNS-фикс, Teredo/IPv6, игровой UDP, автозапуск, стоп при выходе.
@@ -41,15 +43,14 @@ Python, pip и зависимости для запуска **не нужны**.
 
 | DNS | Адреса |
 |---|---|
-| VK / Mail.ru | `76.76.2.0`, `76.76.10.0` |
-| SafeDNS | `195.46.39.39`, `195.46.39.40` |
-| AdGuard DNS | `94.140.14.14`, `94.140.15.15` |
-| Yandex | `77.88.8.8`, `77.88.8.1` |
 | Quad9 | `9.9.9.9`, `149.112.112.112` |
 | Cloudflare | `1.1.1.1`, `1.0.0.1` |
 | Google | `8.8.8.8`, `8.8.4.4` |
+| Yandex | `77.88.8.8`, `77.88.8.1` |
 
 Выбирается первый, который отдаёт нормальные адреса YouTube/Steam/Discord и проходит проверку связи. Исходный DNS сохраняется в `utils/gui-dns-backup.json`; тумблер **DNS-фикс** возвращает всё как было.
+
+DNS можно выбрать вручную в селекторе статус-карточки: **Авто / Quad9 / Cloudflare / Google / Yandex / Системный (сброс)**.
 
 ## Dota
 
