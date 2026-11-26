@@ -1,6 +1,8 @@
 # Zapret Control
 
-Нормальный GUI для zapret на Windows: YouTube, Discord, Steam без терминала и без Python.
+Нормальный GUI для **zapret** на Windows: **YouTube, Discord, Steam, Dota 2** без терминала и без Python. Готовый EXE — скачай и запусти.
+
+**English:** Windows GUI for zapret (DPI censorship bypass) — YouTube, Discord, Steam, Dota 2. Ready-to-run EXE, no Python required.
 
 ![Windows](https://img.shields.io/badge/Windows-10%2F11%20x64-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB)
@@ -84,3 +86,8 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed ^
 
 См. [NOTICE.md](NOTICE.md). В сборку входят `winws.exe` и списки из проекта zapret, а также WinDivert. У них свои лицензии; GUI-код — MIT.
 
+
+
+## Ключевые слова
+
+zapret, запрет, zapret gui, Zapret Control, обход блокировок, обход DPI, DPI bypass, YouTube, Discord, Steam, Dota 2, Windows, WinDivert, winws, winws.exe, скачать zapret, zapret для Windows, zapret discord youtube.
