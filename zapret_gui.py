@@ -29,7 +29,7 @@ from tkinter import messagebox, ttk
 # --------------------------------------------------------------------------
 # paths
 # --------------------------------------------------------------------------
-APP_VERSION = "1.9"
+APP_VERSION = "2.0"
 
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
@@ -929,7 +929,7 @@ def stop_engine():
     time.sleep(0.5)
 
 
-def start_engine(profile, variant, game_udp):
+def start_engine(profile, variant, game_udp, wait=1.5):
     stop_engine()
     for p in (ENGINE_OUT, ENGINE_ERR):
         try:
@@ -952,7 +952,7 @@ def start_engine(profile, variant, game_udp):
     finally:
         out.close()
         err.close()
-    time.sleep(1.5)
+    time.sleep(wait)
     if proc.poll() is not None:
         txt = (read_text(ENGINE_ERR) + "\n" + read_text(ENGINE_OUT)).strip()
         txt = re.sub(r"\s+", " ", txt)[:600]
@@ -1025,10 +1025,15 @@ def _tune_score(row):
     )
 
 
-def auto_tune(profile, game_udp, progress=None):
-    results = []
-    best, best_score = None, -1
-    max_score = 215
+def _empty_tune_row(variant):
+    return {
+        "variant": variant, "youtube": False, "yt_video": False,
+        "yt_cdn": False, "steam": False, "steam_api": False,
+        "discord": False, "discord_cdn": False, "score": 0, "code": "",
+    }
+
+
+def _run_tune_checks(profile, game_udp, variant, restart=True):
     yt_home = "https://www.youtube.com"
     yt_video = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     yt_cdn = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
@@ -1037,71 +1042,104 @@ def auto_tune(profile, game_udp, progress=None):
     discord = "https://discord.com/api/v10/gateway"
     discord_cdn = "https://cdn.discordapp.com/embed/avatars/0.png"
 
+    row = _empty_tune_row(variant)
+    if restart:
+        start_engine(profile, variant, game_udp, wait=1.0)
+        time.sleep(0.3)
+
+    ok, code, _detail, _ = test_url(yt_home, 4, retries=1)
+    row["youtube"] = ok
+    row["code"] = code
+    # если YouTube вообще не открылся — не тратим время на остальные проверки
+    if ok:
+        row["yt_video"] = test_url(yt_video, 4, retries=1)[0]
+        row["yt_cdn"] = test_url(yt_cdn, 3, retries=1)[0]
+        row["steam"] = test_url(steam, 3, retries=1)[0]
+        row["steam_api"] = test_url(steam_api, 3, retries=1)[0]
+        row["discord"] = test_url(discord, 2, retries=1)[0]
+        row["discord_cdn"] = test_url(discord_cdn, 2, retries=1)[0]
+    row["score"] = _tune_score(row)
+    return row
+
+
+def auto_tune(profile, game_udp, progress=None):
+    results = []
+    best, best_score = None, -1
+    max_score = 215
+    saved = load_settings().get("variant")
+
+    try:
+        flush_dns()
+    except Exception:
+        pass
+
+    # 1) быстрая проверка текущей стратегии без перезапуска
+    if saved in VARIANTS and engine_running():
+        if progress:
+            progress(f"текущая {saved}")
+        row = _run_tune_checks(profile, game_udp, saved, restart=False)
+        results.append(row)
+        best, best_score = saved, row["score"]
+        append_gui_log(
+            f"TUNE current {saved} score={row['score']} yt={row['youtube']} "
+            f"video={row['yt_video']} steam={row['steam']} api={row['steam_api']}"
+        )
+        if best_score >= max_score:
+            return best, best_score, results
+
+    # 2) перебираем остальные стратегии
     for variant in VARIANTS:
+        if variant == saved and results:
+            continue
         if progress:
             progress(variant)
-        row = {
-            "variant": variant, "youtube": False, "yt_video": False,
-            "yt_cdn": False, "steam": False, "steam_api": False,
-            "discord": False, "discord_cdn": False, "score": 0, "code": "",
-        }
         try:
-            start_engine(profile, variant, game_udp)
-            time.sleep(0.8)
-            flush_dns()
-            ok, code, _detail, _ = test_url(yt_home, 7)
-            row["youtube"] = ok
-            row["code"] = code
-            if ok:
-                row["yt_video"] = test_url(yt_video, 7)[0]
-                row["yt_cdn"] = test_url(yt_cdn, 5)[0]
-            row["steam"] = test_url(steam, 6)[0]
-            row["steam_api"] = test_url(steam_api, 6)[0]
-            row["discord"] = test_url(discord, 6)[0]
-            row["discord_cdn"] = test_url(discord_cdn, 5)[0]
-            row["score"] = _tune_score(row)
-            if row["score"] > best_score:
-                best_score = row["score"]
-                best = variant
+            row = _run_tune_checks(profile, game_udp, variant, restart=True)
             results.append(row)
             append_gui_log(
                 f"TUNE {variant} score={row['score']} yt={row['youtube']} "
                 f"video={row['yt_video']} cdn={row['yt_cdn']} steam={row['steam']} "
                 f"api={row['steam_api']} discord={row['discord']}"
             )
+            if row["score"] > best_score:
+                best_score = row["score"]
+                best = variant
         except Exception as exc:
+            row = _empty_tune_row(variant)
             row["code"] = "ERR"
             results.append(row)
             append_gui_log(f"TUNE {variant} error: {exc}")
         finally:
             stop_engine()
-    # повтор лучшего варианта убирает случайные единичные таймауты
+        if best_score >= max_score:
+            break
+
+    # 3) повтор лучшего варианта, если он не идеален
     if best and best_score < max_score:
         row = next((r for r in results if r["variant"] == best), None)
         if row:
             if progress:
                 progress(f"перепроверка {best}")
             try:
-                start_engine(profile, best, game_udp)
-                time.sleep(0.8)
-                flush_dns()
+                start_engine(profile, best, game_udp, wait=1.0)
+                time.sleep(0.3)
                 if not row["youtube"]:
-                    ok, code, _d, _ = test_url(yt_home, 7)
+                    ok, code, _d, _ = test_url("https://www.youtube.com", 4, retries=1)
                     row["youtube"] = ok
                     row["code"] = code
                 if row["youtube"]:
                     if not row["yt_video"]:
-                        row["yt_video"] = test_url(yt_video, 7)[0]
+                        row["yt_video"] = test_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 4, retries=1)[0]
                     if not row["yt_cdn"]:
-                        row["yt_cdn"] = test_url(yt_cdn, 5)[0]
-                if not row["steam"]:
-                    row["steam"] = test_url(steam, 6)[0]
-                if not row["steam_api"]:
-                    row["steam_api"] = test_url(steam_api, 6)[0]
-                if not row["discord"]:
-                    row["discord"] = test_url(discord, 6)[0]
-                if not row["discord_cdn"]:
-                    row["discord_cdn"] = test_url(discord_cdn, 5)[0]
+                        row["yt_cdn"] = test_url("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", 3, retries=1)[0]
+                    if not row["steam"]:
+                        row["steam"] = test_url("https://steamcommunity.com", 3, retries=1)[0]
+                    if not row["steam_api"]:
+                        row["steam_api"] = test_url("https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/", 3, retries=1)[0]
+                    if not row["discord"]:
+                        row["discord"] = test_url("https://discord.com/api/v10/gateway", 2, retries=1)[0]
+                    if not row["discord_cdn"]:
+                        row["discord_cdn"] = test_url("https://cdn.discordapp.com/embed/avatars/0.png", 2, retries=1)[0]
                 row["score"] = _tune_score(row)
                 best_score = row["score"]
                 append_gui_log(f"TUNE retest {best} score={best_score}")
@@ -1950,6 +1988,7 @@ class App:
             self.queue.put(("tune_error", str(exc)))
 
     def _finish_tune(self, best, score, rows):
+        previous_variant = self.settings.get("variant")
         for r in rows:
             mark = "OK" if r["score"] >= 170 else "--"
             self.log_write(
@@ -1980,6 +2019,11 @@ class App:
             self.service_cards["youtube"].set("ok" if yt_ok else "fail", "автоподбор")
             self.service_cards["steam"].set("ok" if st_ok else "fail", "автоподбор")
             self.service_cards["discord"].set("ok" if dc_ok else "fail", "автоподбор")
+        if engine_running() and best == previous_variant and score >= 215:
+            self.log_write("Текущая стратегия уже работает — перезапуск не нужен", "ok")
+            self.set_busy(False)
+            self.update_engine_visual()
+            return
         self.set_busy(True, "ЗАПУСК…")
         try:
             pid = start_engine(self.settings["profile"], best, bool(self.settings.get("gameUdp")))
